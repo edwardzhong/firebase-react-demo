@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>movie</title>
+	<style>
+		.wrap{
+			padding: 10px;
+		}
+		button{
+			color:#fff;
+			padding: 5px 10px;
+			border: 1px solid hsl(207, 88%, 49%);
+			background-color: hsl(207, 88%, 49%);
+			border-radius: 4px;
+			margin: 5px 0;
+		}
+		#login{
+			margin-left: 10px;
+		}
+	</style>
+</head>
+<body>
+	<div class="wrap">
+		<input type="text" id="email" placeholder="email">
+		<input type="password" name="pass" id="pass" placeholder="passwrod">
+	</div>
+	<div class="wrap">
+		<p id="userName"></p>
+		<p id="userEmail"></p>
+		<p id="userId"></p>
+	</div>
+	<button id="login">sign out</button><br>
+	<div class="wrap">
+		<input id="author" type="text" placeholder="author"><br>
+		<input id="title" type="text" placeholder="title"><br>
+		<input id="body" type="text" placeholder="body"><br>
+		<button id="add">add data</button>
+	</div>
+	<div class="wrap">
+		<input type="text" id="key" placeholder="key">
+		<input type="text" id="updateName" placeholder="username"><br>
+		<button id="delete">delete</button>
+		<button id="update">update</button>
+	</div>
+	<button id="initData">initData</button>
+<script src="./js/jquery.min.js"></script>
+<script src="./js/firebase.js"></script>
+<script>
+  // Initialize Firebase
+  var config = {
+    apiKey: "AIzaSyDnyMxDJLkujoxi-SS-ifQZRfW4e1lAZis",
+    authDomain: "movie-5a92f.firebaseapp.com",
+    databaseURL: "https://movie-5a92f.firebaseio.com",
+    projectId: "movie-5a92f",
+    storageBucket: "movie-5a92f.appspot.com",
+    messagingSenderId: "732117347220"
+  };
+  firebase.initializeApp(config);
+</script>
+<script>
+var database = firebase.database(),
+	loginBtn=document.getElementById('login'),
+	formWrap=document.getElementsByClassName('wrap')[0],
+	userWrap=document.getElementsByClassName('wrap')[1];
+/**
+ * Handles the sign in button press.
+ */
+function toggleSignIn() {
+  if (firebase.auth().currentUser) {
+    // [START signout]
+    firebase.auth().signOut();
+    // [END signout]
+  } else {
+    // Sign in with email and pass.
+    // [START authwithemail]
+    var email=$('#email').val(),
+    	password=$('#pass').val();
+
+    firebase.auth().signInWithEmailAndPassword(email, password).catch(function(error) {
+      // Handle Errors here.
+      var errorCode = error.code;
+      var errorMessage = error.message;
+      // [START_EXCLUDE]
+      if (errorCode === 'auth/wrong-password') {
+        alert('Wrong password.');
+      } else {
+        alert(errorMessage);
+      }
+      console.log(error);
+      // [END_EXCLUDE]
+    });
+    // [END authwithemail]
+  }
+}
+function initState(){
+	firebase.auth().onAuthStateChanged(function(user) {
+		if(user){
+			loginBtn.innerHTML = 'sign out';
+			formWrap.style.display='none';
+			userWrap.style.display='';
+			$('#userName').html(user.displayName);
+			$('#userEmail').html(user.email);
+			$('#userId').html(user.uid);
+		} else {
+			loginBtn.innerHTML = 'sign in';
+			formWrap.style.display='';
+			userWrap.style.display='none';
+		}
+	});
+	loginBtn.addEventListener('click',toggleSignIn,false);
+}
+
+initState();
+
+// 直接用push，set增加数据项目
+function pushList(uid,username,title,body){
+	var newPostRef = database.ref().child('posts').push({
+		author: username,
+		uid: uid,
+		body: body,
+		title: title,
+		starCount: 0
+	},function(err){
+		console.log(err);
+	});
+	// newPostRef.set({
+	// 	author: username,
+	// 	uid: uid,
+	// 	body: body,
+	// 	title: title,
+	// 	starCount: 0
+	// });
+}
+// 使用update分别增加数据项
+function writeNewPost(uid, username, title, body) {
+  // A post entry.
+  var postData = {
+    author: username,
+    uid: uid,
+    body: body,
+    title: title,
+    starCount: 0
+  };
+
+  // Get a key for a new Post.
+  var newPostKey = database.ref().child('posts').push().key;
+
+  // Write the new post's data simultaneously in the posts list and the user's post list.
+  var updates = {};
+  updates['/posts/' + newPostKey] = postData;
+  updates['/user-posts/' + uid + '/' + newPostKey] = postData;
+
+  return database.ref().update(updates);
+}
+
+
+$('#add').on('click',function(){
+	var uid=$('#userId').html();
+	var author=$('#author').val();
+	var title=$('#title').val();
+	var body=$('#body').val();
+	pushList(uid,author,title,body);
+});
+// 删除
+$('#delete').on('click',function(){
+	var id=$('#key').val();
+	database.ref('posts/'+id).remove(function(err){
+		console.log(err);
+	});
+});
+// 更新 事务transaction
+$('#update').on('click',function(){
+	var id=$('#key').val(),
+		name=$('#updateName').val();
+	// 使用update更新普通属性
+	database.ref('posts').child(id).update({author:name},function(err){
+		console.log(err);
+	});
+
+	// 使用事务更新starCount
+	database.ref('posts/'+id).child('starCount').transaction(function(starCount){
+		return starCount+1;
+	},function(error, committed, snapshot) {
+		if (error) {
+			console.log('Transaction failed abnormally!', error);
+		} else if (!committed) {
+			console.log('We aborted the transaction (because ada already exists).');
+		} else {
+			console.log('ada added!');
+		}
+	})
+	
+});
+//监听 增加事件 按starCount数值排序，查找值等1的项，limitToFirst从开头算起，limitToLast从末位开始算起
+// database.ref('posts').orderByChild('starCount').equalTo(1).limitToLast(5).on('child_added',function(data){
+// 	console.log(data.val());
+// })
+
+database.ref('posts').orderByChild('author').startAt('').limitToFirst(3).on('child_added',function(data){
+	console.log(data.val());
+})
+
+
+database.ref('posts').on('child_changed',function(data){
+	console.log(data.val());
+})
+
+// 使用once只加载一次，不监控变化
+database.ref('posts/').once('value').then(function(snapshot) {
+	console.log(snapshot.key);
+	for(let [key,val] of Object.entries(snapshot.val())){
+		console.log(key);
+		console.log(val);
+	}
+});
+$('#initData').on('click',function(){
+	$.get('./src/data/list.json').done(function(data){
+		data.forEach(item=> database.ref().child('posts').push(item));
+	});
+});
+</script>
+</body>
+</html>
